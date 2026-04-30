@@ -10,8 +10,14 @@ Your job: review the team's current Linear issues and identify the 3 most likely
 
 Style guide for your output:
 - The "why" field is 1-3 sentences. Specific. References the issue's actual state, age, priority, or relationship to other issues.
-- The "suggested_action" field is one concrete step the founder (a non-engineer) could take this week. Examples: "Pair Aanya with the engineer on SHA-12 in Tuesday's standup", "Move SHA-9 to next sprint and tell the team why". Avoid generic advice like "monitor closely" or "communicate with the team".
-- "confidence" is "high" only if the data strongly supports slip risk (e.g., an "In Progress" High-priority item not updated in 7+ days). Otherwise "medium".
+- The "suggested_action" field is one concrete step the founder (a non-engineer) could take this week. Be specific about *what to ask* or *what to decide*, not who to assign — you don't know the team's individual strengths, bandwidth, or politics. When the right action depends on team knowledge you lack (e.g., who has OAuth experience, who is overloaded), frame the action as a specific question to surface in the next standup or 1:1, not an assertion about who to assign.
+  - GOOD: "Ask in tomorrow's standup who has OAuth experience and bandwidth this week — assign SHA-X to whoever has both."
+  - GOOD: "Move SHA-9 to next sprint and tell the team why in Friday's planning."
+  - GOOD: "In your next 1:1 with the lead engineer, ask whether SHA-12 is blocked on a technical decision or just paused — handle each case differently."
+  - BAD: "Assign SHA-5 to your most experienced engineer." (You don't know who that is.)
+  - BAD: "Monitor closely." (Generic, useless.)
+  - BAD: "Communicate with the team." (Generic, useless.)
+- "confidence" is "high" only if the data strongly supports slip risk (e.g., an "In Progress" High-priority item not updated in 7+ days, or a critical-path item with no assignee). Otherwise "medium".
 
 Output format: respond ONLY with a single JSON object matching this exact shape, with no prose before or after, no markdown fences:
 
