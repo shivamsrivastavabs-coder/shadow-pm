@@ -13,16 +13,39 @@ export type IssueForPrompt = {
   priority?: number | null; // Linear: 0=none, 1=urgent, 2=high, 3=medium, 4=low
 };
 
-export type RiskFlag = {
-  /** Issue identifier from Linear, e.g. "SHA-7". Must match an input issue. */
-  id: string;
-  /** Issue title, copied verbatim, for UI display. */
+/**
+ * Slim shape of a GitHub PR passed into the prompt.
+ * Independent from the GitHubPullRequest API type — keep them decoupled
+ * so we can reshape the prompt-side without touching the connector.
+ */
+export type PullRequestForPrompt = {
+  /** Stable identifier — "owner/repo#42" */
+  ref: string;
   title: string;
-  /** 1-3 sentence reasoning grounded in the issue data. No speculation. */
+  state: "open" | "closed";
+  draft: boolean;
+  author: string;
+  updatedAt: string; // ISO date
+  /** Number of review comments — null if unknown (search API doesn't expose it) */
+  reviewComments: number | null;
+};
+
+export type RiskFlag = {
+  /**
+   * Identifier of the flagged item. Must match an input item:
+   *   - For Linear issues: "SHA-7"
+   *   - For GitHub PRs:    "owner/repo#42"
+   */
+  id: string;
+  /** Title or item kind label: "issue" or "pr". Helps UI render correctly. */
+  kind?: "issue" | "pr";
+  /** Title, copied verbatim, for UI display. */
+  title: string;
+  /** 1-3 sentence reasoning grounded in the input data. No speculation. */
   why: string;
   /** Concrete, single-step action a non-technical founder could take this week. */
   suggested_action: string;
-  /** "high" | "medium" — Claude's confidence the issue will actually slip. */
+  /** "high" | "medium" — Claude's confidence the item will actually slip. */
   confidence: "high" | "medium";
 };
 

@@ -51,8 +51,9 @@ export default function RiskRadar() {
 
       {status.kind === "idle" && (
         <p className="text-sm text-neutral-500">
-          Asks Claude to review your active Linear issues and flag the 3 most likely
-          to slip this week, with reasoning and a suggested action.
+          Asks Claude to review your active Linear issues and (if connected)
+          open GitHub PRs, then flag the 3 items most likely to slip this week —
+          with reasoning and a concrete suggested action.
         </p>
       )}
 
@@ -101,15 +102,29 @@ function RiskCard({ flag }: { flag: RiskFlag }) {
     flag.confidence === "high"
       ? "bg-red-900/60 text-red-200"
       : "bg-amber-900/60 text-amber-200";
+
+  // Infer kind from id shape if Claude didn't include the kind field:
+  // PR refs look like "owner/repo#42"; issues look like "SHA-7".
+  const kind = flag.kind ?? (flag.id.includes("#") ? "pr" : "issue");
+  const kindColor =
+    kind === "pr"
+      ? "bg-violet-900/60 text-violet-200"
+      : "bg-sky-900/60 text-sky-200";
+
   return (
     <li className="rounded-lg border border-neutral-800 bg-neutral-900/60 p-4 flex flex-col gap-2">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-baseline gap-2">
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <span
+            className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${kindColor}`}
+          >
+            {kind}
+          </span>
           <span className="font-mono text-xs text-neutral-500">{flag.id}</span>
           <h3 className="text-sm font-medium text-neutral-100">{flag.title}</h3>
         </div>
         <span
-          className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded ${confidenceColor}`}
+          className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded shrink-0 ${confidenceColor}`}
         >
           {flag.confidence}
         </span>

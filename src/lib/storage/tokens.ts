@@ -10,6 +10,12 @@ export type StoredTokens = {
     expires_in: number;  // seconds
     scope: string;
   };
+  github?: {
+    access_token: string;
+    obtained_at: number;
+    scope: string;
+    token_type: string; // typically "bearer"
+  };
 };
 
 export async function readTokens(): Promise<StoredTokens> {
@@ -29,4 +35,9 @@ export async function writeTokens(next: StoredTokens): Promise<void> {
 export async function isLinearConnected(): Promise<boolean> {
   const t = await readTokens();
   return Boolean(t.linear?.access_token);
+}
+
+export async function isGitHubConnected(): Promise<boolean> {
+  const t = await readTokens();
+  return Boolean(t.github?.access_token);
 }

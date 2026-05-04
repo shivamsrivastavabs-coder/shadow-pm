@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { readTokens } from "@/lib/storage/tokens";
 import { linearGraphQL } from "@/lib/linear/client";
+import { fetchOpenPullRequests } from "@/lib/github/client";
 import { getAnthropicClient, getDefaultModel } from "@/lib/llm/anthropic";
 import {
   SYSTEM_PROMPT,
@@ -8,6 +9,7 @@ import {
 } from "@/lib/risk-radar/prompt";
 import type {
   IssueForPrompt,
+  PullRequestForPrompt,
   RiskRadarResponse,
   RiskRadarErrorResponse,
   RiskFlag
@@ -48,9 +50,10 @@ type IssuesResp = { issues: { nodes: RawIssue[] } };
 export async function POST(): Promise<
   NextResponse<RiskRadarResponse | RiskRadarErrorResponse>
 > {
-  // 1. Auth check
+  // 1. Auth check — Linear is required, GitHub is optional (graceful degrade).
   const tokens = await readTokens();
   const linearToken = tokens.linear?.access_token;
+  const githubToken = tokens.github?.access_token;
   if (!linearToken) {
     return NextResponse.json(
       { error: "Linear is not connected. Connect it on the home page first." },
@@ -58,7 +61,7 @@ export async function POST(): Promise<
     );
   }
 
-  // 2. Pull issues
+  // 2a. Pull Linear issues
   let issues: IssueForPrompt[];
   try {
     const data = await linearGraphQL<IssuesResp>(linearToken, ISSUES_QUERY);
@@ -78,18 +81,38 @@ export async function POST(): Promise<
     );
   }
 
-  // Filter out Done/Cancelled — they can't slip
+  // 2b. Pull GitHub PRs (optional). If GH is connected but the call fails,
+  // log and continue — we'd rather give partial analysis than fail the whole call.
+  let prs: PullRequestForPrompt[] = [];
+  if (githubToken) {
+    try {
+      const rawPrs = await fetchOpenPullRequests(githubToken, 25);
+      prs = rawPrs.map((p) => ({
+        ref: p.ref,
+        title: p.title,
+        state: p.state,
+        draft: p.draft,
+        author: p.author,
+        updatedAt: p.updated_at,
+        reviewComments: p.review_comments
+      }));
+    } catch (err) {
+      console.error("[risk-radar] GitHub PR fetch failed:", errMsg(err));
+    }
+  }
+
+  // Filter out Done/Cancelled/Duplicate — they can't slip
   const activeIssues = issues.filter(
     (i) => !["Done", "Cancelled", "Duplicate"].includes(i.state)
   );
 
-  if (activeIssues.length === 0) {
+  if (activeIssues.length === 0 && prs.length === 0) {
     return NextResponse.json({
       generated_at: new Date().toISOString(),
       model: getDefaultModel(),
       at_risk: [],
       summary:
-        "No active issues to analyze — everything is closed. Add issues to your Linear workspace and re-run."
+        "No active issues or open PRs to analyze. Add work to your Linear workspace or GitHub repos and re-run."
     });
   }
 
@@ -102,7 +125,7 @@ export async function POST(): Promise<
       model,
       max_tokens: 1500,
       system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: buildUserMessage(activeIssues) }]
+      messages: [{ role: "user", content: buildUserMessage(activeIssues, prs) }]
     });
     const block = response.content.find((b) => b.type === "text");
     if (!block || block.type !== "text") {
@@ -128,8 +151,13 @@ export async function POST(): Promise<
     );
   }
 
-  // 5. Validate the AI didn't hallucinate issue IDs not in the input
-  const validIds = new Set(activeIssues.map((i) => i.identifier));
+  // 5. Validate the AI didn't hallucinate IDs not in the input.
+  // Issue IDs (SHA-NN) and PR refs (owner/repo#NN) live in the same id field
+  // — we accept anything that exactly matches one of our inputs.
+  const validIds = new Set<string>([
+    ...activeIssues.map((i) => i.identifier),
+    ...prs.map((p) => p.ref)
+  ]);
   const cleanFlags: RiskFlag[] = parsed.at_risk
     .filter((f) => validIds.has(f.id))
     .slice(0, 3);
