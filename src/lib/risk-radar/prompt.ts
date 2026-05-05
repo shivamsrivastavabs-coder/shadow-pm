@@ -1,4 +1,8 @@
-import type { IssueForPrompt, PullRequestForPrompt } from "./types";
+import type {
+  IssueForPrompt,
+  PullRequestForPrompt,
+  SlackMessageForPromptContext
+} from "./types";
 
 /**
  * System prompt — the "personality" of the shadow PM.
@@ -6,13 +10,18 @@ import type { IssueForPrompt, PullRequestForPrompt } from "./types";
  */
 export const SYSTEM_PROMPT = `You are an experienced senior product manager acting as a "shadow PM" for a non-technical founder running a small dev team.
 
-Your job: review the team's current Linear issues AND open GitHub pull requests, then identify the 3 items most likely to slip or block the team this week. The same item can be a Linear issue OR a GitHub PR — flag whichever is highest-leverage. You ground every observation in the data provided. You do not invent context, deadlines, or facts not present in the data. If you genuinely can't find 3 risky items, return fewer.
+Your job: review the team's current Linear issues, open GitHub pull requests, and recent Slack chatter from the team's channels, then identify the 3 items most likely to slip or block the team this week. The flagged item itself must be a Linear issue or a GitHub PR — Slack messages are *evidence* you cite when explaining the risk, not flaggable items themselves. You ground every observation in the data provided. You do not invent context, deadlines, commitments, or facts not present in the data. If you genuinely can't find 3 risky items, return fewer.
 
-Cross-tool patterns to watch for (when both are present):
-- A PR that has been open for 4+ days with no recent updates — likely stalled in review.
+Cross-tool patterns to watch for:
+- A PR open 4+ days with no recent updates — likely stalled in review.
 - A draft PR that hasn't moved — author may be blocked or has moved on.
 - An "In Progress" Linear issue with no corresponding open PR after several days — work may not have actually started.
 - A PR whose title clearly matches a Linear issue still in "Todo" — Linear is out of sync, the team has lost the source of truth.
+- Someone publicly committed to a date in Slack ("I'll have this done by Friday") and the corresponding issue/PR is not on track to meet it. This is the highest-signal pattern when present — quote the message in the "why".
+- Someone flagged a blocker in Slack ("waiting on X", "stuck on Y") with no follow-up and no update on the related item.
+- A Slack discussion identifies a decision that needs to be made, but the related issue is still in Todo with no movement after the discussion.
+
+When citing Slack evidence in the "why" field, quote the relevant phrase and name the channel and how many days ago: e.g., 'In #engineering 3 days ago, alex said "I'll wrap this Friday" — but PR is still draft with no commits since.'
 
 Style guide for your output:
 - The "why" field is 1-3 sentences. Specific. References the item's actual state, age, priority, or relationship to other items (cite IDs when relevant).
@@ -44,12 +53,13 @@ Output format: respond ONLY with a single JSON object matching this exact shape,
 }`;
 
 /**
- * Build the user message for a given list of issues + open PRs.
- * Renders each item as a clean block — easier for the model than nested JSON.
+ * Build the user message for a given list of issues + open PRs + recent Slack messages.
+ * Renders each block as plain text — easier for the model than nested JSON.
  */
 export function buildUserMessage(
   issues: IssueForPrompt[],
-  prs: PullRequestForPrompt[] = []
+  prs: PullRequestForPrompt[] = [],
+  slackMessages: SlackMessageForPromptContext[] = []
 ): string {
   if (issues.length === 0 && prs.length === 0) {
     return "There are no issues or pull requests to review. Return at_risk: [] and a summary saying so.";
@@ -112,8 +122,30 @@ export function buildUserMessage(
     sections.push("Open GitHub PRs: (none)");
   }
 
+  if (slackMessages.length > 0) {
+    const slackBlocks = slackMessages
+      .map((m) => {
+        const ageDays = daysSince(m.timestamp, today);
+        const when =
+          ageDays === 0
+            ? "today"
+            : ageDays === 1
+            ? "yesterday"
+            : `${ageDays} days ago`;
+        // Cap message length so one verbose post doesn't blow the budget.
+        const text = m.text.length > 280 ? `${m.text.slice(0, 280)}…` : m.text;
+        return `[#${m.channel}] ${m.author} (${when}): ${text}`;
+      })
+      .join("\n");
+    sections.push(
+      `Recent Slack messages from the team's channels (last 7 days, newest first, ${slackMessages.length} messages):\n\n${slackBlocks}`
+    );
+  } else {
+    sections.push("Recent Slack messages: (none — Slack not connected or no recent activity)");
+  }
+
   sections.push(
-    "Review these and return the JSON object as specified in the system instructions. Identify the 3 items most likely to slip or block the team this week — they can be issues, PRs, or a mix. If fewer than 3 are clearly at risk, return fewer rather than padding the list."
+    "Review the issues, PRs, and Slack chatter together. Identify the 3 issues or PRs most likely to slip or block the team this week. When Slack messages contain commitments, blockers, or decisions relevant to an issue/PR, quote them in the 'why' field — that's the highest-signal evidence you have. If fewer than 3 items are clearly at risk, return fewer rather than padding the list."
   );
 
   return sections.join("\n\n");

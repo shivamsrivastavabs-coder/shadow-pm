@@ -30,6 +30,18 @@ export type PullRequestForPrompt = {
   reviewComments: number | null;
 };
 
+/**
+ * Slack message used as *context* for the prompt — not a flaggable item itself.
+ * The model uses these to cite evidence when reasoning about issues/PRs:
+ *   "alex said in #engineering 3 days ago that this would ship Friday."
+ */
+export type SlackMessageForPromptContext = {
+  channel: string; // without #
+  author: string;  // display name
+  text: string;
+  timestamp: string; // ISO
+};
+
 export type RiskFlag = {
   /**
    * Identifier of the flagged item. Must match an input item:

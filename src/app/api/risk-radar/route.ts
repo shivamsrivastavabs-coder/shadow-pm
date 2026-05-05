@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { readTokens } from "@/lib/storage/tokens";
 import { linearGraphQL } from "@/lib/linear/client";
 import { fetchOpenPullRequests } from "@/lib/github/client";
+import { fetchRecentSlackMessages } from "@/lib/slack/client";
 import { getAnthropicClient, getDefaultModel } from "@/lib/llm/anthropic";
 import {
   SYSTEM_PROMPT,
@@ -10,6 +11,7 @@ import {
 import type {
   IssueForPrompt,
   PullRequestForPrompt,
+  SlackMessageForPromptContext,
   RiskRadarResponse,
   RiskRadarErrorResponse,
   RiskFlag
@@ -50,10 +52,11 @@ type IssuesResp = { issues: { nodes: RawIssue[] } };
 export async function POST(): Promise<
   NextResponse<RiskRadarResponse | RiskRadarErrorResponse>
 > {
-  // 1. Auth check — Linear is required, GitHub is optional (graceful degrade).
+  // 1. Auth check — Linear is required, GitHub + Slack are optional (graceful degrade).
   const tokens = await readTokens();
   const linearToken = tokens.linear?.access_token;
   const githubToken = tokens.github?.access_token;
+  const slackToken = tokens.slack?.access_token;
   if (!linearToken) {
     return NextResponse.json(
       { error: "Linear is not connected. Connect it on the home page first." },
@@ -81,25 +84,13 @@ export async function POST(): Promise<
     );
   }
 
-  // 2b. Pull GitHub PRs (optional). If GH is connected but the call fails,
-  // log and continue — we'd rather give partial analysis than fail the whole call.
-  let prs: PullRequestForPrompt[] = [];
-  if (githubToken) {
-    try {
-      const rawPrs = await fetchOpenPullRequests(githubToken, 25);
-      prs = rawPrs.map((p) => ({
-        ref: p.ref,
-        title: p.title,
-        state: p.state,
-        draft: p.draft,
-        author: p.author,
-        updatedAt: p.updated_at,
-        reviewComments: p.review_comments
-      }));
-    } catch (err) {
-      console.error("[risk-radar] GitHub PR fetch failed:", errMsg(err));
-    }
-  }
+  // 2b/2c. Pull GitHub PRs and Slack messages in parallel (both optional).
+  // If a connector is wired but its call fails, log and continue — partial
+  // analysis beats failing the whole request.
+  const [prs, slackMessages] = await Promise.all([
+    fetchPRsOrEmpty(githubToken),
+    fetchSlackOrEmpty(slackToken)
+  ]);
 
   // Filter out Done/Cancelled/Duplicate — they can't slip
   const activeIssues = issues.filter(
@@ -125,7 +116,12 @@ export async function POST(): Promise<
       model,
       max_tokens: 1500,
       system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: buildUserMessage(activeIssues, prs) }]
+      messages: [
+        {
+          role: "user",
+          content: buildUserMessage(activeIssues, prs, slackMessages)
+        }
+      ]
     });
     const block = response.content.find((b) => b.type === "text");
     if (!block || block.type !== "text") {
@@ -214,4 +210,43 @@ function safeParse(s: string): { summary: string; at_risk: RiskFlag[] } | null {
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+async function fetchPRsOrEmpty(
+  token: string | undefined
+): Promise<PullRequestForPrompt[]> {
+  if (!token) return [];
+  try {
+    const raw = await fetchOpenPullRequests(token, 25);
+    return raw.map((p) => ({
+      ref: p.ref,
+      title: p.title,
+      state: p.state,
+      draft: p.draft,
+      author: p.author,
+      updatedAt: p.updated_at,
+      reviewComments: p.review_comments
+    }));
+  } catch (err) {
+    console.error("[risk-radar] GitHub PR fetch failed:", errMsg(err));
+    return [];
+  }
+}
+
+async function fetchSlackOrEmpty(
+  token: string | undefined
+): Promise<SlackMessageForPromptContext[]> {
+  if (!token) return [];
+  try {
+    const raw = await fetchRecentSlackMessages(token);
+    return raw.map((m) => ({
+      channel: m.channel,
+      author: m.author,
+      text: m.text,
+      timestamp: m.timestamp
+    }));
+  } catch (err) {
+    console.error("[risk-radar] Slack fetch failed:", errMsg(err));
+    return [];
+  }
 }

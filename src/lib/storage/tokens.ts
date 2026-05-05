@@ -16,6 +16,17 @@ export type StoredTokens = {
     scope: string;
     token_type: string; // typically "bearer"
   };
+  slack?: {
+    /** User token, prefixed "xoxp-..." — acts on behalf of the authed user */
+    access_token: string;
+    obtained_at: number;
+    scope: string;
+    /** Slack user id, e.g. "U02ABCDE" */
+    user_id: string;
+    /** Workspace info — useful for the UI */
+    team_id: string;
+    team_name: string;
+  };
 };
 
 export async function readTokens(): Promise<StoredTokens> {
@@ -40,4 +51,9 @@ export async function isLinearConnected(): Promise<boolean> {
 export async function isGitHubConnected(): Promise<boolean> {
   const t = await readTokens();
   return Boolean(t.github?.access_token);
+}
+
+export async function isSlackConnected(): Promise<boolean> {
+  const t = await readTokens();
+  return Boolean(t.slack?.access_token);
 }
